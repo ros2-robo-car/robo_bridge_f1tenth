@@ -1,0 +1,3 @@
+[console_scripts]
+f110_gym_client = f110_gym_client.f110_gym_client:main
+
