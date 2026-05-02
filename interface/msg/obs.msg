@@ -1,0 +1,9 @@
+int32 ego_idx
+float32[1080] scans
+float32 poses_x
+float32 poses_y
+float32 poses_theta
+float32 linear_vels_x
+float32 linear_vels_y
+float32 ang_vels_z
+bool collisions

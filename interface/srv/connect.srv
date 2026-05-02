@@ -1,0 +1,9 @@
+float32 timestep
+bool async_mode
+string<=16 map
+---
+uint8 status
+string<=256 msg
+float32 timestep
+bool async_mode
+string<=16 map

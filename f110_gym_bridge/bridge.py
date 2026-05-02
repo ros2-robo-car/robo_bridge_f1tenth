@@ -3,31 +3,35 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
-DEFAULT_HOST = 'localhost'
-DEFAULT_PORT = 22200
+from constants import MSGTYPE, STATUS, sock_format
+
 RECEIVE_UNIT = 8192
 
 PUBLISH_PERIOD = 1/80
-ERRORSTR_FMT = "Connection Error with %s:%s: %s"
+ERR_CONNECT_FMT = "Connection Error with %s:%s: %s"
 
-header_parser = struct.Struct('HH')
+header_parser = struct.Struct('!HH')
 
 class F110GymBridge(Node):
-    def __init__(self, cli_args=[]):
+    def __init__(self):
         super().__init__('f110_gym_bridge')
-        self.host = DEFAULT_HOST
-        self.port = DEFAULT_PORT
-        if len(cli_args) >= 2:
-            self.host = cli_args[0]
-            self.port = cli_args[1]
+        self.declare_parameter('host', 'localhost')
+        self.declare_parameter('port', 22200)
+
+        self.declare_parameter('timestep', 0.01)
+        self.declare_parameter('map', 'vegas')
+        self.declare_parameter('async_mode', False)
 
         self.socket = None
         self.closedEvent = threading.Event()
 
         self.pubdata, self.publock = None, threading.Lock()
-        self.publisher = self.create_publisher(String, "f110_recv", 10)
-        self.subscriber = self.create_subscription(String, "f110_send", self.listen, 10)
+        self.publisher = None
         self.pub_interval = None
+        self.subscriber = None
+        self.init_service = None
+
+        self.get_logger().log("node f110_gym_bridge initialized.")
         
     def publish(self):
         self.publock.acquire()
@@ -39,15 +43,23 @@ class F110GymBridge(Node):
 
     def close(self, e=None):
         if not e == None:
-            self.get_logger().error(ERRORSTR_FMT.format(self.host, self.port, e))
+            addr = self.socket.getpeername()
+            self.get_logger().error(ERR_CONNECT_FMT.format(addr[0], addr[1], e))
         try: 
             self.socket.close()
         except:
             pass
+        self.closedEvent.set()
         self.socket = None
-
+        self.publisher.destroy()
+        self.subscriber.destroy()
 
     def connect(self):
+        self.closedEvent.clear()
+        host = self.get_parameter('host').get_parameter_value().string_value
+        port = self.get_parameter('port').get_parameter_value().integer_value
+        
+        self.get_logger().log(f"connecting to {host}:{port}")
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             self.socket.connect((self.host, self.port))
@@ -56,6 +68,9 @@ class F110GymBridge(Node):
             return
         
         self.pub_interval = self.create_timer(PUBLISH_PERIOD, self.publish)
+        self.publisher = self.create_publisher(String, "f110_recv", 10)
+        self.subscriber = self.create_subscription(String, "f110_send", self.listen, 10)
+        # self.init_service = self.create_service()
 
         recv_thread = threading.Thread(target=self.recvloop)
         recv_thread.start()
@@ -106,15 +121,23 @@ class F110GymBridge(Node):
             self.close(e)
             return 0
 
-
     def is_socket_valid(self):
         return type(self.socket) == socket.socket
 
+main_bridge = None
+
 def main(args=None):
     rclpy.init(args=args)
-    bridge = F110GymBridge()
-    rclpy.spin(bridge)
+    main_bridge = F110GymBridge()
+    rclpy.spin(main_bridge)
     rclpy.shutdown()
 
-if __name__ == "__main__":
-    main()
+def connect(args=None):
+    if main_bridge == None:
+        Node.get_logger().error("node f110_gym_bridge is not initialized.")
+    main_bridge.connect()
+
+def close(args=None):
+    if main_bridge == None:
+        Node.get_logger().error("node f110_gym_bridge is not initialized.")
+    main_bridge.close()
