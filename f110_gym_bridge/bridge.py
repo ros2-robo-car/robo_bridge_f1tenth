@@ -3,7 +3,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
-from constants import MSGTYPE, STATUS, sock_format
+from .constants import MSGTYPE, STATUS, sock_format
 
 RECEIVE_UNIT = 8192
 
@@ -31,7 +31,7 @@ class F110GymBridge(Node):
         self.subscriber = None
         self.init_service = None
 
-        self.get_logger().log("node f110_gym_bridge initialized.")
+        self.get_logger().info("node f110_gym_bridge initialized.")
         
     def publish(self):
         self.publock.acquire()
@@ -59,7 +59,7 @@ class F110GymBridge(Node):
         host = self.get_parameter('host').get_parameter_value().string_value
         port = self.get_parameter('port').get_parameter_value().integer_value
         
-        self.get_logger().log(f"connecting to {host}:{port}")
+        self.get_logger().info(f"connecting to {host}:{port}")
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             self.socket.connect((self.host, self.port))
@@ -134,10 +134,10 @@ def main(args=None):
 
 def connect(args=None):
     if main_bridge == None:
-        Node.get_logger().error("node f110_gym_bridge is not initialized.")
+        raise Exception("node f110_gym_bridge is not initialized.")
     main_bridge.connect()
 
 def close(args=None):
     if main_bridge == None:
-        Node.get_logger().error("node f110_gym_bridge is not initialized.")
+        raise Exception("node f110_gym_bridge is not initialized.")
     main_bridge.close()
