@@ -13,11 +13,11 @@ ERRORSTR_FMT = "Connection Error with %s:%s: %s"
 header_parser = struct.Struct('HH')
 
 class F110GymBridge(Node):
-    def __init__(self, cli_args):
+    def __init__(self, cli_args=[]):
         super().__init__('f110_gym_bridge')
         self.host = DEFAULT_HOST
         self.port = DEFAULT_PORT
-        if len(cli_args) > 0:
+        if len(cli_args) >= 2:
             self.host = cli_args[0]
             self.port = cli_args[1]
 
@@ -26,7 +26,7 @@ class F110GymBridge(Node):
 
         self.pubdata, self.publock = None, threading.Lock()
         self.publisher = self.create_publisher(String, "f110_recv", 10)
-        self.subscriber = self.create_subscription(String, "f110_send", self.listen)
+        self.subscriber = self.create_subscription(String, "f110_send", self.listen, 10)
         self.pub_interval = None
         
     def publish(self):
@@ -109,3 +109,12 @@ class F110GymBridge(Node):
 
     def is_socket_valid(self):
         return type(self.socket) == socket.socket
+
+def main(args=None):
+    rclpy.init(args=args)
+    bridge = F110GymBridge()
+    rclpy.spin(bridge)
+    rclpy.shutdown()
+
+if __name__ == "__main__":
+    main()
