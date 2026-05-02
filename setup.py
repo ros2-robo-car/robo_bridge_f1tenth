@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'f110_gym_client'
+package_name = 'f110_gym_bridge'
 
 setup(
     name=package_name,
@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'f110_gym_client = f110_gym_client.f110_gym_client:main'
+            'f110_gym_bridge = f110_gym_bridge.f110_gym_bridge:main'
         ],
     },
 )
