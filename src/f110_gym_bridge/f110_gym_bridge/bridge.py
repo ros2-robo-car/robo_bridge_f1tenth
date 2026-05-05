@@ -108,8 +108,10 @@ class F110GymBridge(Node):
 
     def close(self, e=None):
         # is it in worker thread?
-        if self.closedEvent.is_set():
+        if self.recv_thread == threading.current_thread():
             return
+        
+        self.closedEvent.set()
 
         if not e == None:
             self.get_logger().error(f"Connection Error with {self.addr[0]}:{self.addr[1]}: {e}")
@@ -131,8 +133,6 @@ class F110GymBridge(Node):
         if self.recv_thread != None:
             self.recv_thread.join()
             self.recv_thread = None
-
-        self.closedEvent.set()
 
     def recvloop(self):
         while not self.closedEvent.is_set():
@@ -191,7 +191,6 @@ def main(args=None):
     except KeyboardInterrupt:
         main_bridge.get_logger().info("Interrupted")
         main_bridge.close()
-        return
 
     if rclpy.ok():
         main_bridge.destroy_node()

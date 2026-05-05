@@ -8,7 +8,9 @@ from f110_gym_bridge_interface.srv import Initsim
 
 class F110GymClientExample(Node):
     def __init__(self, **kwargs):
-        super().__init__('f110_gym_client')       
+        super().__init__('f110_gym_client')
+
+    def request(self, **kwargs):
         self.init_client = self.create_client(Initsim, 'init_sym')
         if not self.init_client.wait_for_service(timeout_sec=3):
             self.get_logger().info('service not available. check whether service is on.')
@@ -18,13 +20,9 @@ class F110GymClientExample(Node):
         req = Initsim.Request()
         for key in kwargs.keys():
             setattr(req, key, kwargs[key])
-        res = self.init_client.call(req)
+        return self.init_client.call_async(req)
 
-        if res['status'] == STATUS.ERROR:
-            self.get_logger().error(res['msg'])
-        elif res['status'] == STATUS.BUSY:
-            self.get_logger().warn(res['msg'])
-
+    def run(self):
         self.recv_subscribe = self.create_subscription(Recv, "f110_recv", self.onRecv, 10)
         self.send_publisher = self.create_publisher(Act, "f110_send", 10)
 
@@ -70,11 +68,24 @@ def main():
 
     try:
         rclpy.init()
-        main_client = F110GymClientExample(**args)
+        main_client = F110GymClientExample()
+
+        future = main_client.request(**args)
+        rclpy.spin_until_future_complete(main_client, future, timeout_sec=10)
+        res = future.result()
+        if res['status'] == STATUS.ERROR:
+            main_client.get_logger().error(res['msg'])
+        elif res['status'] == STATUS.BUSY:
+            main_client.get_logger().warn(res['msg'])
+
+        main_client.run()
         rclpy.spin(main_client)
+
     except KeyboardInterrupt:
         main_client.get_logger().info("Interrupted")
     except SystemExit:
         pass
+
     if rclpy.ok():
+        main_client.destroy_node()
         rclpy.shutdown()
