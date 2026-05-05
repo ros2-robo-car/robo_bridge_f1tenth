@@ -73,10 +73,12 @@ def main():
         future = main_client.request(**args)
         rclpy.spin_until_future_complete(main_client, future, timeout_sec=10)
         res = future.result()
-        if res['status'] == STATUS.ERROR:
-            main_client.get_logger().error(res['msg'])
-        elif res['status'] == STATUS.BUSY:
-            main_client.get_logger().warn(res['msg'])
+        if res.status == STATUS.ERROR:
+            main_client.get_logger().error(res.msg)
+            raise SystemExit
+        elif res.status == STATUS.BUSY:
+            main_client.get_logger().warn(res.msg)
+            raise SystemExit
 
         main_client.run()
         rclpy.spin(main_client)
