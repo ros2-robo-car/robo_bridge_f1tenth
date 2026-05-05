@@ -26,19 +26,25 @@ class F110GymBridge(Node):
         self.closedEvent = threading.Event()
 
         self.pubdata, self.publock = None, threading.Lock()
-        self.publisher = None
+        self.recv_publisher = None
         self.pub_interval = None
-        self.subscriber = None
+        self.send_subscriber = None
         self.init_service = None
 
         self.get_logger().info("node f110_gym_bridge initialized.")
-        
+    
+    # publish with recv_publisher
     def publish(self):
         self.publock.acquire()
         data = self.pubdata
         self.publock.release()
 
+    # callback of send_subscriber
     def listen(self, msg):
+        pass
+
+    # callback of init_service
+    def initsim(self, request, response):
         pass
 
     def close(self, e=None):
@@ -51,8 +57,8 @@ class F110GymBridge(Node):
             pass
         self.closedEvent.set()
         self.socket = None
-        self.publisher.destroy()
-        self.subscriber.destroy()
+        self.recv_publisher.destroy()
+        self.send_subscriber.destroy()
 
     def connect(self):
         self.closedEvent.clear()
@@ -68,9 +74,9 @@ class F110GymBridge(Node):
             return
         
         self.pub_interval = self.create_timer(PUBLISH_PERIOD, self.publish)
-        self.publisher = self.create_publisher(String, "f110_recv", 10)
-        self.subscriber = self.create_subscription(String, "f110_send", self.listen, 10)
-        # self.init_service = self.create_service()
+        self.recv_publisher = self.create_publisher(String, "f110_recv", 10)
+        self.send_subscriber = self.create_subscription(String, "f110_send", self.listen, 10)
+        # self.init_service = self.create_service(, 'init_sym', self.initsim)
 
         recv_thread = threading.Thread(target=self.recvloop)
         recv_thread.start()
@@ -131,13 +137,3 @@ def main(args=None):
     main_bridge = F110GymBridge()
     rclpy.spin(main_bridge)
     rclpy.shutdown()
-
-def connect(args=None):
-    if main_bridge == None:
-        raise Exception("node f110_gym_bridge is not initialized.")
-    main_bridge.connect()
-
-def close(args=None):
-    if main_bridge == None:
-        raise Exception("node f110_gym_bridge is not initialized.")
-    main_bridge.close()
