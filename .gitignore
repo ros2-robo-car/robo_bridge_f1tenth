@@ -1,4 +1,7 @@
 .env
 .venv
 .vscode
+build
+install
+log
 *.egg-info
