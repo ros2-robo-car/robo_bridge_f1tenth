@@ -6,8 +6,6 @@ float32 timestep
 uint8 flags
 string<=16 map
 ---
-uint8 FLAG_ASYNC = 1
-
 uint8 STATUS_READY = 0      # simulation is ready
 uint8 STATUS_RUNNING = 1    # simulation is running
 uint8 STATUS_DONE = 2       # simulation is done

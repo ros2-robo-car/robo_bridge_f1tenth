@@ -2,20 +2,22 @@ import rclpy
 from rclpy.node import Node
 
 import argparse
-from constants import STATUS
+from .constants import STATUS
 from f110_gym_bridge_interface.msg import Act, Recv
 from f110_gym_bridge_interface.srv import Initsim
 
 class F110GymClientExample(Node):
     def __init__(self, **kwargs):
-        
+        super().__init__('f110_gym_client')       
         self.init_client = self.create_client(Initsim, 'init_sym')
         if not self.init_client.wait_for_service(timeout_sec=3):
             self.get_logger().info('service not available. check whether service is on.')
+            self.destroy_node()
+            raise SystemExit
 
         req = Initsim.Request()
-        for key, value in kwargs:
-            req[key] = value
+        for key in kwargs.keys():
+            setattr(req, key, kwargs[key])
         res = self.init_client.call(req)
 
         if res['status'] == STATUS.ERROR:
@@ -45,31 +47,34 @@ def main():
     }
 
     parser = argparse.ArgumentParser()
-    for key, _ in arg_defaults: 
+    for key in arg_defaults.keys(): 
         parser.add_argument(f'--{key}', default=argparse.SUPPRESS)
-    for key, _ in flag_const:
+    for key in flag_const.keys():
         parser.add_argument(f'--{key}', action='store_true')
 
     parsed = parser.parse_args()
     args = {}
-    for key, value in arg_defaults: 
+    for key in arg_defaults.keys(): 
         if not hasattr(parsed, key):
-            print(f"use default value: {key} = {value}")
-            args[key] = value
+            print(f"use default value: {key} = {arg_defaults[key]}")
+            args[key] = arg_defaults[key]
         else:
-            args[key] = parsed[key]
+            args[key] = getattr(parsed, key)
 
     flags = 0
-    for key, value in flag_const:
-        if parsed[key]:
+    for key in flag_const.keys():
+        if getattr(parsed, key):
             flags |= flag_const[key]
     args['flags'] = flags
 
 
     try:
         rclpy.init()
-        main_client = F110GymClientExample(args)
+        main_client = F110GymClientExample(**args)
         rclpy.spin(main_client)
     except KeyboardInterrupt:
         main_client.get_logger().info("Interrupted")
-    rclpy.shutdown()
+    except SystemExit:
+        pass
+    if rclpy.ok():
+        rclpy.shutdown()

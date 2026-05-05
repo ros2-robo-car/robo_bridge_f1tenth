@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'init = f110_gym_bridge.bridge:main'
+            'init = f110_gym_bridge.bridge:main',
+            'start = f110_gym_bridge.client_example:main'
         ],
     },
 )
