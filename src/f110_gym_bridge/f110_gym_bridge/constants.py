@@ -1,17 +1,22 @@
+from enum import IntEnum, auto
 import struct
 
-class MSGTYPE:
-    REQUEST = 0
-    RESPONSE = 1
-    SEND = 2
-    RECV = 3
+class MSGTYPE(IntEnum):
+    REQUEST = auto()
+    RESPONSE = auto()
+    SEND = auto()
+    RECV = auto()
+    MAX = auto()
 
-class STATUS:
-    IDLE = 0
-    BUSY = 1
-    ERROR = 0xff
+class STATUS(IntEnum):
+    READY = auto()
+    RUNNING = auto()
+    DONE = auto()
+    BUSY = auto()
+    ERROR = auto()
+    MAX = auto()
 
-sock_format = {
+FORMATTER = {
     MSGTYPE.REQUEST: struct.Struct('!fB16s'),
     MSGTYPE.RESPONSE: struct.Struct('!B256sfB16s'),
     MSGTYPE.SEND: struct.Struct('!ff'),
