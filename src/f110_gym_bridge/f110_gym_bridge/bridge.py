@@ -68,6 +68,7 @@ class F110GymBridge(Node):
                 raise Exception(f"Sim Server Response Error: {resattr['msg']}")
         except Exception as e:
             err_response['msg'] = f"Connection Error: {e}"
+            print(len(err_response['msg']), err_response['msg'])
             for key in err_response.keys():
                 setattr(response, key, err_response[key])
             self.close(e)
