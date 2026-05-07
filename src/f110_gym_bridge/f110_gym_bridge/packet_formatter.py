@@ -5,9 +5,16 @@ _type_parser = struct.Struct('!B')
 def pack(type: MSGTYPE, attr: dict) -> bytes:
     try:
         if type == MSGTYPE.REQUEST:
-            return FORMATTER[MSGTYPE.REQUEST].pack(attr['timestep'], attr['flags'], attr['map'])
+            return _type_parser.pack(type) + FORMATTER[MSGTYPE.REQUEST].pack(
+                attr['timestep'], 
+                attr['flags'], 
+                attr['map']
+            )
         elif type == MSGTYPE.SEND:
-            return FORMATTER[MSGTYPE.SEND].pack(attr['steer'], attr['speed'])
+            return _type_parser.pack(type) + FORMATTER[MSGTYPE.SEND].pack(
+                attr['steer'], 
+                attr['speed']
+            )
         else: 
             raise Exception(f"Invalid type {type}")
     except Exception as e:

@@ -159,8 +159,7 @@ class F110GymBridge(Node):
         while cur < len(msg):
             msglen = header_parser.unpack(msg[cur:cur+4])
             if cur + msglen + 4 > len(msg): break
-            data = msg[ cur + 4 : cur + msglen + 4 ]
-            lastdata = data
+            lastdata = msg[ cur + 4 : cur + msglen + 4 ]
             cur += msglen + 4
         
         self.publock.acquire()

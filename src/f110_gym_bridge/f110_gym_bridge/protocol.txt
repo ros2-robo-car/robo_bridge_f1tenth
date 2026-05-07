@@ -1,0 +1,45 @@
+```
+
+header: {
+    size: uint32,
+    type: uint8
+}
+
+REQUEST : {
+    header,
+    timestep: float32,
+    flags: uint8,
+    map: string[16]
+}
+
+RESPONSE : {
+    header,
+    status: uint8,
+    msg: string[256],
+    timestep: float32,
+    flags: uint8,
+    map: string[16]
+}
+
+SEND : {
+    header,
+    steer: float32,
+    speed: float32
+}
+
+RECV: {
+    header,
+    egoidx: int32,
+    scans: float32[1080],
+    poses_x: float32,
+    poses_y: float32,
+    poses_theta: float32,
+    linear_vels_x: float32,
+    linear_vels_y: float32,
+    ang_vels_z: float32,
+    collisions: uint8,
+    status: uint8,
+    elapsed_time: float32
+}
+
+```
