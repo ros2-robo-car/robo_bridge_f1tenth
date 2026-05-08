@@ -116,6 +116,8 @@ class F110GymBridge(Node):
 
         if not e == None:
             self.get_logger().error(f"Connection Error with {self.addr[0]}:{self.addr[1]}: {e}")
+            if self.recv_publisher != None:
+                Recv({''})
 
         try: 
             self.socket.close()
