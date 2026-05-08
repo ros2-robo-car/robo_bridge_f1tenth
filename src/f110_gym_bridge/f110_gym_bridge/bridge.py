@@ -1,9 +1,9 @@
 import socket, struct, threading
 import rclpy
 from rclpy.node import Node
-from f110_gym_bridge_interface.msg import Act, Recv
+from f110_gym_bridge_interface.msg import Act, Obs, Recv, Status
 from f110_gym_bridge_interface.srv import Initsim
-from .constants import MSGTYPE, STATUS
+from .constants import MSGTYPE
 from .packet_formatter import pack, unpack
 
 RECEIVE_UNIT = 8192
@@ -40,53 +40,55 @@ class F110GymBridge(Node):
     def initsim(self, request, response):
         self.closedEvent.clear()
         self.addr = (request.host, request.port)
-        reqattr = {
-            'timestep': request.timestep,
-            'map': request.map,
-            'flags': request.flags
-        }
-        err_response = {
-            'status': int(STATUS.ERROR),
-            'msg': '',
+        # reqattr = {
+        #     'timestep': request.timestep,
+        #     'map': request.map,
+        #     'flags': request.flags
+        # }
+        # err_response = {
+        #     'status': int(STATUS.ERROR),
+        #     'msg': '',
+        #     'timestep': request.timestep,
+        #     'flags': request.flags,
+        #     'map': request.map
+        # }
+        sim_status = Status()
+        response = Initsim.Response(kwargs={
+            'sim_status': sim_status,
             'timestep': request.timestep,
             'flags': request.flags,
             'map': request.map
-        }
+        })
+        
 
         self.get_logger().info(f"connecting to {self.addr[0]}:{self.addr[1]}")
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.settimeout(TIMEOUT)
         try:
             self.socket.connect(self.addr)
-            self.socket.send(pack(MSGTYPE.REQUEST, reqattr))
+            self.socket.send(pack(MSGTYPE.REQUEST, request))
 
             data = self.socket.recv(RECEIVE_UNIT)
             msgtype, resattr = unpack(data[4:])
             if msgtype != MSGTYPE.RESPONSE:
-                raise Exception(f"Wrong Response type: {msgtype}")
-            if resattr['status'] == STATUS.ERROR:
+                raise Exception(f"Wrong Response type: {msgtype.name} ({msgtype})")
+            if resattr['status'] == Status.ERROR:
                 raise Exception(f"Sim Server Response Error: {resattr['msg']}")
+            if resattr['status'] >= Status.MAX:
+                raise Exception(f"Invalid Status: {resattr['status']}")
         except Exception as e:
-            err_response['msg'] = f"Connection Error: {e}"
-            print(len(err_response['msg']), err_response['msg'])
-            for key in err_response.keys():
-                setattr(response, key, err_response[key])
+            sim_status.status = Status.ERROR
+            sim_status.msg = f"Connection Error: {e}"
             self.close(e)
             return response
 
-        if resattr['status'] == STATUS.BUSY:
-            msg = f"server is busy ({resattr['msg']}). try agian later"
-            err_response['msg'] = msg
-            err_response['status'] = int(STATUS.BUSY)
-            for key in err_response.keys():
-                setattr(response, key, err_response[key])
+        if resattr['status'] == Status.BUSY:
+            msg = f"Sim Server is busy ({resattr['msg']}). try agian later"
+            sim_status.status = Status.BUSY
+            sim_status.msg = msg
             self.get_logger().warn(msg)
             self.close()
             return response
-
-        for key in resattr.keys():
-            setattr(response, key, resattr[key])
-        response.status = int(response.status)
 
         self.pub_interval = self.create_timer(max(resattr['timestep'], MIN_TIMESTEP), self.publish)
         self.recv_publisher = self.create_publisher(Recv, "f110_recv", 10)
@@ -94,6 +96,14 @@ class F110GymBridge(Node):
 
         self.recv_thread = threading.Thread(target=self.recvloop)
         self.recv_thread.start()
+
+        msg = f"Sim Server is Ready: {resattr['msg']}"
+        self.get_logger().info(msg)
+        sim_status.status = resattr['status']
+        sim_status.msg = msg
+        response.timestep = resattr['timestep']
+        response.flags = resattr['flags']
+        response.map = resattr['map']
 
         return response
 
@@ -108,16 +118,20 @@ class F110GymBridge(Node):
         pass
 
     def close(self, e=None):
-        # is it in worker thread?
-        if self.recv_thread == threading.current_thread():
-            return
-        
-        self.closedEvent.set()
-
+        # log if there is error
         if not e == None:
             self.get_logger().error(f"Connection Error with {self.addr[0]}:{self.addr[1]}: {e}")
             if self.recv_publisher != None:
-                Recv({''})
+                sim_status = Status(kwargs={
+                    'status': Status.ERROR,
+                    'msg': f"Connection Error: {e}"
+                })
+                self.recv_publisher.publish(Recv(kwargs={'sim_status': sim_status}))
+
+        # is it in main thread?
+        if self.recv_thread == threading.current_thread():
+            return
+        self.closedEvent.set()
 
         try: 
             self.socket.close()
@@ -143,7 +157,7 @@ class F110GymBridge(Node):
 
     def recv(self):
         if not self.is_socket_valid():
-            self.close()
+            self.closedEvent.set()
             return
         
         msg = b''
@@ -153,6 +167,8 @@ class F110GymBridge(Node):
             while len(recv) > 0:
                 recv = self.socket.recv(RECEIVE_UNIT)
                 msg += recv
+            if len(msg) == 0:
+                raise ConnectionError('Disconnect')
         except Exception as e:
             self.close(e)
             return
