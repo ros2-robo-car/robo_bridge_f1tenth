@@ -2,8 +2,7 @@ import rclpy
 from rclpy.node import Node
 
 import argparse
-from .constants import STATUS
-from f110_gym_bridge_interface.msg import Act, Recv
+from f110_gym_bridge_interface.msg import Act, Recv, Status
 from f110_gym_bridge_interface.srv import Initsim
 
 class F110GymClientExample(Node):
@@ -13,7 +12,7 @@ class F110GymClientExample(Node):
     def request(self, **kwargs):
         self.init_client = self.create_client(Initsim, 'init_sym')
         if not self.init_client.wait_for_service(timeout_sec=3):
-            self.get_logger().info('service not available. check whether service is on.')
+            self.get_logger().error('Service not available. Check whether service is on.')
             self.destroy_node()
             raise SystemExit
 
@@ -73,11 +72,14 @@ def main():
         future = main_client.request(**args)
         rclpy.spin_until_future_complete(main_client, future, timeout_sec=10)
         res = future.result()
-        if res.status == STATUS.ERROR:
-            main_client.get_logger().error(res.msg)
+        if res is None:
+            main_client.get_logger().error('Can not receive response from sim server.')
             raise SystemExit
-        elif res.status == STATUS.BUSY:
-            main_client.get_logger().warn(res.msg)
+        elif res.sim_status.status == Status.ERROR:
+            main_client.get_logger().error(res.sim_status.msg)
+            raise SystemExit
+        elif res.sim_status.status == Status.BUSY:
+            main_client.get_logger().warn(res.sim_status.msg)
             raise SystemExit
 
         main_client.run()

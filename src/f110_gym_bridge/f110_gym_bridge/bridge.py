@@ -39,26 +39,21 @@ class F110GymBridge(Node):
     # callback of init_service
     def initsim(self, request, response):
         self.closedEvent.clear()
+
         self.addr = (request.host, request.port)
-        # reqattr = {
-        #     'timestep': request.timestep,
-        #     'map': request.map,
-        #     'flags': request.flags
-        # }
-        # err_response = {
-        #     'status': int(STATUS.ERROR),
-        #     'msg': '',
-        #     'timestep': request.timestep,
-        #     'flags': request.flags,
-        #     'map': request.map
-        # }
-        sim_status = Status()
-        response = Initsim.Response(kwargs={
-            'sim_status': sim_status,
+        reqattr = {
             'timestep': request.timestep,
-            'flags': request.flags,
-            'map': request.map
-        })
+            'map': request.map,
+            'flags': request.flags
+        }
+
+        sim_status = Status()
+        response = Initsim.Response(
+            sim_status = sim_status,
+            timestep = request.timestep,
+            flags = request.flags,
+            map = request.map
+        )
         
 
         self.get_logger().info(f"connecting to {self.addr[0]}:{self.addr[1]}")
@@ -66,7 +61,9 @@ class F110GymBridge(Node):
         self.socket.settimeout(TIMEOUT)
         try:
             self.socket.connect(self.addr)
-            self.socket.send(pack(MSGTYPE.REQUEST, request))
+            send_msg = pack(MSGTYPE.REQUEST, reqattr)
+            send_msg = header_parser.pack(len(send_msg)) + send_msg
+            self.socket.send(send_msg)
 
             data = self.socket.recv(RECEIVE_UNIT)
             msgtype, resattr = unpack(data[4:])
@@ -122,11 +119,11 @@ class F110GymBridge(Node):
         if not e == None:
             self.get_logger().error(f"Connection Error with {self.addr[0]}:{self.addr[1]}: {e}")
             if self.recv_publisher != None:
-                sim_status = Status(kwargs={
-                    'status': Status.ERROR,
-                    'msg': f"Connection Error: {e}"
-                })
-                self.recv_publisher.publish(Recv(kwargs={'sim_status': sim_status}))
+                sim_status = Status(
+                    status=Status.ERROR,
+                    msg=f"Connection Error: {e}"
+                )
+                self.recv_publisher.publish(Recv(sim_status=sim_status))
 
         # is it in main thread?
         if self.recv_thread == threading.current_thread():

@@ -20,5 +20,5 @@ FORMATTER = {
     MSGTYPE.REQUEST: struct.Struct('!fB16s'),
     MSGTYPE.RESPONSE: struct.Struct('!B256sfB16s'),
     MSGTYPE.SEND: struct.Struct('!ff'),
-    MSGTYPE.RECV: struct.Struct('B256s!i1080f3f3fBf')
+    MSGTYPE.RECV: struct.Struct('!B256si1080f3f3fBf')
 }
