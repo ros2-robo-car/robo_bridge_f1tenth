@@ -29,6 +29,8 @@ SEND : {
 
 RECV: {
     header,
+    status: uint8,
+    msg: string[256],
     egoidx: int32,
     scans: float32[1080],
     poses_x: float32,
@@ -38,7 +40,6 @@ RECV: {
     linear_vels_y: float32,
     ang_vels_z: float32,
     collisions: uint8,
-    status: uint8,
     elapsed_time: float32
 }
 

@@ -1,3 +1,3 @@
 Obs obs
-uint8 status
+Status sim_status
 float32 elapsed_time    # elpased time from start
