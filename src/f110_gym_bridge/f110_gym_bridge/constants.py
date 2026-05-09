@@ -8,14 +8,6 @@ class MSGTYPE(IntEnum):
     RECV = auto()
     MAX = auto()
 
-# class STATUS(IntEnum):
-#     READY = 0
-#     RUNNING = auto()
-#     DONE = auto()
-#     BUSY = auto()
-#     ERROR = auto()
-#     MAX = auto()
-
 FORMATTER = {
     MSGTYPE.REQUEST: struct.Struct('!fB16s'),
     MSGTYPE.RESPONSE: struct.Struct('!B256sfB16s'),

@@ -147,18 +147,26 @@ class F110GymBridge(Node):
         recv.elapsed_time = attr['elapsed_time']
         recv.sim_status = Status(status=attr['status'], msg=attr['msg'])
         
-        with self.recv_publisher_lock:
-            if self.recv_publisher == None:
-                return
-            elif self.recv_publisher.get_subscription_count() == 0:
-                self.get_logger().error(f"Disconnect with Client")
-                self.close()
-            else:
-                self.recv_publisher.publish(recv)
+        self.recv_publisher_lock.acquire()
+        if self.recv_publisher == None:
+            self.recv_publisher_lock.release()
+            return
+        elif self.recv_publisher.get_subscription_count() == 0:
+            self.recv_publisher_lock.release()
+            self.get_logger().error(f"Disconnect with Client")
+            self.close()
+        else:
+            self.recv_publisher.publish(recv)
+            self.recv_publisher_lock.release()
 
     # callback of send_subscriber
-    def listen(self, msg):
-        pass
+    def listen(self, msg: Act):
+        sendattr = {
+            'steer': msg.steer,
+            'speed': msg.speed
+        }
+        send_data = pack(MSGTYPE.SEND, sendattr)
+        self.send(send_data)
 
     def log_error(self, sim_status: Status):
         verbose = 'Error'
@@ -183,7 +191,7 @@ class F110GymBridge(Node):
         self.socket = None
         self.addr = None
         with self.recv_publisher_lock:
-            if self.recv_publisher != None: 
+            if self.recv_publisher != None:
                 self.recv_publisher.destroy()
                 self.recv_publisher = None
         with self.send_subscriber_lock:
@@ -226,7 +234,7 @@ class F110GymBridge(Node):
     def send(self, data):
         if not self.is_socket_valid():
             self.close()
-            return 0
+            return
 
         header = header_parser.pack(len(data))
         msg = header + data
@@ -240,7 +248,7 @@ class F110GymBridge(Node):
         except Exception as e:
             sim_status = Status(status=Status.ERROR, msg=str(e))
             self.log_error(sim_status)
-            return 0
+            return
 
     def is_socket_valid(self):
         return type(self.socket) == socket.socket
