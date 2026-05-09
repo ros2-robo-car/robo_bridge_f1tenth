@@ -27,12 +27,13 @@ class F110GymBridge(Node):
         self.addr = None
         self.closedEvent = threading.Event()
 
-        self.pubdata, self.publock = None, threading.Lock()
         self.recv_thread = None
         self.recv_line = queue.Queue()
         self.recv_publisher = None
+        self.recv_publisher_lock = threading.Lock()
         self.pub_interval = None
         self.send_subscriber = None
+        self.send_subscriber_lock = threading.Lock()
         self.init_service = None
 
         self.get_logger().info("node f110_gym_bridge initialized.")
@@ -103,8 +104,10 @@ class F110GymBridge(Node):
             return response
 
         self.pub_interval = self.create_timer(max(resattr['timestep'], MIN_TIMESTEP), self.publish)
-        self.recv_publisher = self.create_publisher(Recv, "f110_recv", 10)
-        self.send_subscriber = self.create_subscription(Act, "f110_send", self.listen, 10)
+        with self.recv_publisher_lock:
+            self.recv_publisher = self.create_publisher(Recv, "f110_recv", 10)
+        with self.send_subscriber_lock:
+            self.send_subscriber = self.create_subscription(Act, "f110_send", self.listen, 10)
 
         self.recv_thread = threading.Thread(target=self.recvloop)
         self.recv_thread.start()
@@ -135,16 +138,23 @@ class F110GymBridge(Node):
             return
         
         obs = Obs()
-        obs.ego_idx, obs.scans, obs.collisions = attr['ego_idx'], attr['scans'], attr['collisions']
+        obs.ego_idx, obs.scans, obs.collisions = attr['ego_idx'], attr['scans'], bool(attr['collisions'])
         obs.poses_x, obs.poses_y, obs.poses_theta = attr['poses_x'], attr['poses_y'], attr['poses_theta']
         obs.linear_vels_x, obs.linear_vels_y, obs.ang_vels_z = attr['linear_vels_x'], attr['linear_vels_y'], attr['ang_vels_z']
 
         recv = Recv()
         recv.obs = obs
         recv.elapsed_time = attr['elapsed_time']
-        recv.sim_status = Status(sim_status=attr['status'], msg=attr['msg'])
+        recv.sim_status = Status(status=attr['status'], msg=attr['msg'])
         
-        self.recv_publisher.publish(recv)
+        with self.recv_publisher_lock:
+            if self.recv_publisher == None:
+                return
+            elif self.recv_publisher.get_subscription_count() == 0:
+                self.get_logger().error(f"Disconnect with Client")
+                self.close()
+            else:
+                self.recv_publisher.publish(recv)
 
     # callback of send_subscriber
     def listen(self, msg):
@@ -154,10 +164,11 @@ class F110GymBridge(Node):
         verbose = 'Error'
         if sim_status.status == Status.FAILURE:
             verbose = 'Failure'
-        self.get_logger().error(f"{verbose} with {self.addr[0]}:{self.addr[1]}: {sim_status.msg}")
-        if self.recv_publisher != None:
-            sim_status.msg = f"{verbose}: {sim_status.msg}"
-            self.recv_publisher.publish(Recv(sim_status=sim_status))
+        self.get_logger().error(f"{verbose}: {sim_status.msg}")
+        with self.recv_publisher_lock:
+            if self.recv_publisher != None:
+                sim_status.msg = f"{verbose}: {sim_status.msg}"
+                self.recv_publisher.publish(Recv(sim_status=sim_status))
 
     def close(self):
         if self.closedEvent.is_set():
@@ -171,12 +182,14 @@ class F110GymBridge(Node):
 
         self.socket = None
         self.addr = None
-        if self.recv_publisher != None: 
-            self.recv_publisher.destroy()
-            self.recv_publisher = None
-        if self.send_subscriber != None:
-            self.send_subscriber.destroy()
-            self.send_subscriber = None
+        with self.recv_publisher_lock:
+            if self.recv_publisher != None: 
+                self.recv_publisher.destroy()
+                self.recv_publisher = None
+        with self.send_subscriber_lock:
+            if self.send_subscriber != None:
+                self.send_subscriber.destroy()
+                self.send_subscriber = None
 
         if self.recv_thread != None:
             if self.recv_thread != threading.current_thread():

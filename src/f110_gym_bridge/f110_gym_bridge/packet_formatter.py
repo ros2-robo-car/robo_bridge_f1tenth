@@ -39,12 +39,10 @@ def unpack(data: bytes) -> tuple[MSGTYPE, dict]:
             status, msg, egoidx = parsed[0], parsed[1], parsed[2]
             scans, poses, vels = parsed[3:1083], parsed[1083:1086], parsed[1086:1089]
             iscols, elapsed_time = parsed[1089], parsed[1090]
-            obs = {}
-            obs['ego_idx'], obs['scans'] = egoidx, scans
-            obs['poses_x'], obs['poses_y'], obs['poses_theta'] = poses[0], poses[1], poses[2]
-            obs['linear_vels_x'], obs['linear_vels_y'], obs['ang_vels_z'] = vels[0], vels[1], vels[2]
-            obs['collisions'] = iscols
-            attr['obs'] = obs
+            attr['ego_idx'], attr['scans'] = egoidx, scans
+            attr['poses_x'], attr['poses_y'], attr['poses_theta'] = poses[0], poses[1], poses[2]
+            attr['linear_vels_x'], attr['linear_vels_y'], attr['ang_vels_z'] = vels[0], vels[1], vels[2]
+            attr['collisions'] = iscols
             attr['status'] = status
             attr['msg'] = msg.decode(encoding='ascii').strip('\x00')
             attr['elapsed_time'] = elapsed_time
