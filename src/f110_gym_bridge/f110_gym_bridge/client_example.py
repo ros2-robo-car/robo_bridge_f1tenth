@@ -22,14 +22,16 @@ class F110GymClientExample(Node):
         return self.init_client.call_async(req)
 
     def run(self):
-        self.recv_subscribe = self.create_subscription(Recv, "f110_recv", self.onRecv, 10)
+        self.recv_subscribe = self.create_subscription(Recv, "f110_recv", self.on_recv, 10)
         self.send_publisher = self.create_publisher(Act, "f110_send", 10)
 
     def subscribe(self):
         pass
 
-    def onRecv(self, msg):
-        pass
+    def on_recv(self, msg: Recv):
+        msg = f'status: [{msg.sim_status.status}] {msg.sim_status.msg}'
+        msg += f'poses: {msg.obs.poses_x}, {msg.obs.poses_y}'
+        self.get_logger().info(msg)
 
 def main():
     arg_defaults = {
@@ -82,6 +84,7 @@ def main():
             main_client.get_logger().warn(res.sim_status.msg)
             raise SystemExit
 
+        main_client.get_logger().info(f'Sim Server is ready: {res.sim_status.msg}')
         main_client.run()
         rclpy.spin(main_client)
 

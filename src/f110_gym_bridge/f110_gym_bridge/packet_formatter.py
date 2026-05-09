@@ -2,6 +2,9 @@ from .constants import *
 
 _type_parser = struct.Struct('!B')
 
+def struct_size(type: MSGTYPE) -> int:
+    return FORMATTER[type].size
+
 def pack(type: MSGTYPE, attr: dict) -> bytes:
     try:
         if type == MSGTYPE.REQUEST:

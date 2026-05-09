@@ -4,13 +4,14 @@ from rclpy.node import Node
 from f110_gym_bridge_interface.msg import Act, Obs, Recv, Status
 from f110_gym_bridge_interface.srv import Initsim
 from .constants import MSGTYPE
-from .packet_formatter import pack, unpack
+from .packet_formatter import *
 
 RECEIVE_UNIT = 8192
 MIN_TIMESTEP = 0.01
 TIMEOUT = 10
 
 header_parser = struct.Struct('!I')
+type_parser = struct.Struct('!B')
 
 class F110GymBridge(Node):
     def __init__(self):
@@ -108,7 +109,31 @@ class F110GymBridge(Node):
     def publish(self):
         self.publock.acquire()
         data = self.pubdata
+        self.pubdata = None
         self.publock.release()
+
+        if data == None:
+            return
+        if len(data) != struct_size(MSGTYPE.RECV) + 4:
+            self.get_logger().error(f"Expected RECV size ({struct_size(MSGTYPE.RECV + 4)}bytes), Receive {len(data)}bytes.")
+            return
+
+        msgtype, attr = unpack(data[4:])
+        if msgtype != MSGTYPE.RECV:
+            self.get_logger().error(f"Wrong RECV type: {msgtype.name} ({msgtype})")
+            return
+        
+        obs = Obs()
+        obs.ego_idx, obs.scans, obs.collisions = attr['ego_idx'], attr['scans'], attr['collisions']
+        obs.poses_x, obs.poses_y, obs.poses_theta = attr['poses_x'], attr['poses_y'], attr['poses_theta']
+        obs.linear_vels_x, obs.linear_vels_y, obs.ang_vels_z = attr['linear_vels_x'], attr['linear_vels_y'], attr['ang_vels_z']
+
+        recv = Recv()
+        recv.obs = obs
+        recv.elapsed_time = attr['elapsed_time']
+        recv.sim_status = Status(sim_status=attr['status'], msg=attr['msg'])
+        
+        self.recv_publisher.publish(recv)
 
     # callback of send_subscriber
     def listen(self, msg):
@@ -167,6 +192,7 @@ class F110GymBridge(Node):
             if len(msg) == 0:
                 raise ConnectionError('Disconnect')
         except Exception as e:
+            self.closedEvent.set()
             self.close(e)
             return
 
