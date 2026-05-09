@@ -1,4 +1,4 @@
-import socket, struct, threading
+import queue, socket, struct, threading
 import rclpy
 from rclpy.node import Node
 from f110_gym_bridge_interface.msg import Act, Obs, Recv, Status
@@ -29,6 +29,7 @@ class F110GymBridge(Node):
 
         self.pubdata, self.publock = None, threading.Lock()
         self.recv_thread = None
+        self.recv_line = queue.Queue()
         self.recv_publisher = None
         self.pub_interval = None
         self.send_subscriber = None
@@ -36,6 +37,18 @@ class F110GymBridge(Node):
 
         self.get_logger().info("node f110_gym_bridge initialized.")
         self.init_service = self.create_service(Initsim, 'init_sym', self.initsim)
+
+    def _last_from_receive_line(self):
+        res = None
+        with self.recv_line.mutex:
+            while self.recv_line._qsize() > 0:
+                res = self.recv_line._get()
+        return res
+    
+    def _flush_receive_line(self):
+        with self.recv_line.mutex:
+            while self.recv_line._qsize() > 0:
+                self.recv_line._get()
     
     # callback of init_service
     def initsim(self, request, response):
@@ -108,18 +121,15 @@ class F110GymBridge(Node):
 
     # publish with recv_publisher
     def publish(self):
-        self.publock.acquire()
-        data = self.pubdata
-        self.pubdata = None
-        self.publock.release()
 
+        data = self._last_from_receive_line()
         if data == None:
             return
         if len(data) != struct_size(MSGTYPE.RECV):
             self.get_logger().error(f"Expected RECV size ({struct_size(MSGTYPE.RECV)}bytes), Receive {len(data)}bytes.")
             return
 
-        msgtype, attr = unpack(data[4:])
+        msgtype, attr = unpack(data)
         if msgtype != MSGTYPE.RECV:
             self.get_logger().error(f"Wrong RECV type: {msgtype.name} ({msgtype})")
             return
@@ -184,13 +194,12 @@ class F110GymBridge(Node):
         
         msg = b''
         try:
-            recv = self.socket.recv(RECEIVE_UNIT)
-            msg += recv
-            while len(recv) > 0:
-                recv = self.socket.recv(RECEIVE_UNIT)
-                msg += recv
-            if len(msg) == 0:
+            recv = self.socket.recv(4)
+            if len(recv) == 0:
                 raise ConnectionError('Disconnect')
+            msglen = header_parser.unpack(recv)[0]
+            msg = self.socket.recv(msglen)
+            self.recv_line.put(msg)
         except (ConnectionError, socket.error) as e:
             sim_status = Status(status=Status.FAILURE, msg=str(e))
             self.log_error(sim_status)
@@ -200,18 +209,6 @@ class F110GymBridge(Node):
             sim_status = Status(status=Status.ERROR, msg=str(e))
             self.log_error(sim_status)
             return
-
-        cur = 0
-        lastdata = None
-        while cur < len(msg):
-            msglen = header_parser.unpack(msg[cur:cur+4])[0]
-            if cur + msglen + 4 > len(msg): break
-            lastdata = msg[ cur + 4 : cur + msglen + 4 ]
-            cur += msglen + 4
-        
-        self.publock.acquire()
-        self.pubdata = lastdata
-        self.publock.release()
     
     def send(self, data):
         if not self.is_socket_valid():
