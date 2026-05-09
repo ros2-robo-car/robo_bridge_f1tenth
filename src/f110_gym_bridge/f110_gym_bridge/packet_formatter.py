@@ -3,7 +3,7 @@ from .constants import *
 _type_parser = struct.Struct('!B')
 
 def struct_size(type: MSGTYPE) -> int:
-    return FORMATTER[type].size
+    return FORMATTER[type].size + 1
 
 def pack(type: MSGTYPE, attr: dict) -> bytes:
     try:
@@ -35,12 +35,15 @@ def unpack(data: bytes) -> tuple[MSGTYPE, dict]:
             attr['flags'] = flags
             attr['map'] = map.decode(encoding='ascii').strip('\x00')
         elif type == MSGTYPE.RECV:
-            status, msg, egoidx, scans, poses, vels, iscol, elapsed_time = FORMATTER[MSGTYPE.RECV].unpack(data[1:])
+            parsed = FORMATTER[MSGTYPE.RECV].unpack(data[1:])
+            status, msg, egoidx = parsed[0], parsed[1], parsed[2]
+            scans, poses, vels = parsed[3:1083], parsed[1083:1086], parsed[1086:1089]
+            iscols, elapsed_time = parsed[1089], parsed[1090]
             obs = {}
             obs['ego_idx'], obs['scans'] = egoidx, scans
             obs['poses_x'], obs['poses_y'], obs['poses_theta'] = poses[0], poses[1], poses[2]
             obs['linear_vels_x'], obs['linear_vels_y'], obs['ang_vels_z'] = vels[0], vels[1], vels[2]
-            obs['collisions'] = iscol
+            obs['collisions'] = iscols
             attr['obs'] = obs
             attr['status'] = status
             attr['msg'] = msg.decode(encoding='ascii').strip('\x00')

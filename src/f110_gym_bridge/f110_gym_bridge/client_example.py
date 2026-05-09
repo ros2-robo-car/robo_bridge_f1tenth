@@ -28,10 +28,25 @@ class F110GymClientExample(Node):
     def subscribe(self):
         pass
 
-    def on_recv(self, msg: Recv):
-        msg = f'status: [{msg.sim_status.status}] {msg.sim_status.msg}'
-        msg += f'poses: {msg.obs.poses_x}, {msg.obs.poses_y}'
-        self.get_logger().info(msg)
+    def on_recv(self, recv_msg: Recv):
+        if recv_msg.sim_status.status == Status.FAILURE:
+            msg = f'status: [{recv_msg.sim_status.status}] {recv_msg.sim_status.msg}'
+            self.get_logger().error(msg)
+            self.close()
+        elif recv_msg.sim_status.status == Status.ERROR:
+            msg = f'status: [{recv_msg.sim_status.status}] {recv_msg.sim_status.msg}, '
+            msg += f'poses: {recv_msg.obs.poses_x}, {recv_msg.obs.poses_y}'
+            self.get_logger().error(msg)
+        else:
+            msg = f'status: [{recv_msg.sim_status.status}] {recv_msg.sim_status.msg}, '
+            msg += f'poses: {recv_msg.obs.poses_x}, {recv_msg.obs.poses_y}'
+            self.get_logger().info(msg)
+            
+    def close(self):
+        self.recv_subscribe.destroy()
+        self.send_publisher.destroy()
+        self.destroy_node()
+        raise SystemExit
 
 def main():
     arg_defaults = {

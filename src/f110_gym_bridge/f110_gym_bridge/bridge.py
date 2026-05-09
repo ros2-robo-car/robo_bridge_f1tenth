@@ -70,14 +70,15 @@ class F110GymBridge(Node):
             msgtype, resattr = unpack(data[4:])
             if msgtype != MSGTYPE.RESPONSE:
                 raise Exception(f"Wrong Response type: {msgtype.name} ({msgtype})")
-            if resattr['status'] == Status.ERROR:
-                raise Exception(f"Sim Server Response Error: {resattr['msg']}")
-            if resattr['status'] >= Status.MAX:
+            elif resattr['status'] >= Status.MAX:
                 raise Exception(f"Invalid Status: {resattr['status']}")
+            elif resattr['status'] >= Status.FAILURE:
+                raise Exception(f"Sim Server Response Error: {resattr['msg']}")
         except Exception as e:
-            sim_status.status = Status.ERROR
+            sim_status.status = Status.FAILURE
             sim_status.msg = f"Connection Error: {e}"
-            self.close(e)
+            self.log_error(sim_status)
+            self.close()
             return response
 
         if resattr['status'] == Status.BUSY:
@@ -114,8 +115,8 @@ class F110GymBridge(Node):
 
         if data == None:
             return
-        if len(data) != struct_size(MSGTYPE.RECV) + 4:
-            self.get_logger().error(f"Expected RECV size ({struct_size(MSGTYPE.RECV + 4)}bytes), Receive {len(data)}bytes.")
+        if len(data) != struct_size(MSGTYPE.RECV):
+            self.get_logger().error(f"Expected RECV size ({struct_size(MSGTYPE.RECV)}bytes), Receive {len(data)}bytes.")
             return
 
         msgtype, attr = unpack(data[4:])
@@ -139,19 +140,17 @@ class F110GymBridge(Node):
     def listen(self, msg):
         pass
 
-    def close(self, e=None):
-        # log if there is error
-        if not e == None:
-            self.get_logger().error(f"Connection Error with {self.addr[0]}:{self.addr[1]}: {e}")
-            if self.recv_publisher != None:
-                sim_status = Status(
-                    status=Status.ERROR,
-                    msg=f"Connection Error: {e}"
-                )
-                self.recv_publisher.publish(Recv(sim_status=sim_status))
+    def log_error(self, sim_status: Status):
+        verbose = 'Error'
+        if sim_status.status == Status.FAILURE:
+            verbose = 'Failure'
+        self.get_logger().error(f"{verbose} with {self.addr[0]}:{self.addr[1]}: {sim_status.msg}")
+        if self.recv_publisher != None:
+            sim_status.msg = f"{verbose}: {sim_status.msg}"
+            self.recv_publisher.publish(Recv(sim_status=sim_status))
 
-        # is it in main thread?
-        if self.recv_thread == threading.current_thread():
+    def close(self):
+        if self.closedEvent.is_set():
             return
         self.closedEvent.set()
 
@@ -170,7 +169,8 @@ class F110GymBridge(Node):
             self.send_subscriber = None
 
         if self.recv_thread != None:
-            self.recv_thread.join()
+            if self.recv_thread != threading.current_thread():
+                self.recv_thread.join()
             self.recv_thread = None
 
     def recvloop(self):
@@ -179,7 +179,7 @@ class F110GymBridge(Node):
 
     def recv(self):
         if not self.is_socket_valid():
-            self.closedEvent.set()
+            self.close()
             return
         
         msg = b''
@@ -191,15 +191,20 @@ class F110GymBridge(Node):
                 msg += recv
             if len(msg) == 0:
                 raise ConnectionError('Disconnect')
+        except (ConnectionError, socket.error) as e:
+            sim_status = Status(status=Status.FAILURE, msg=str(e))
+            self.log_error(sim_status)
+            self.close()
+            return
         except Exception as e:
-            self.closedEvent.set()
-            self.close(e)
+            sim_status = Status(status=Status.ERROR, msg=str(e))
+            self.log_error(sim_status)
             return
 
         cur = 0
         lastdata = None
         while cur < len(msg):
-            msglen = header_parser.unpack(msg[cur:cur+4])
+            msglen = header_parser.unpack(msg[cur:cur+4])[0]
             if cur + msglen + 4 > len(msg): break
             lastdata = msg[ cur + 4 : cur + msglen + 4 ]
             cur += msglen + 4
@@ -217,8 +222,14 @@ class F110GymBridge(Node):
         msg = header + data
         try:
             return self.socket.send(msg)
+        except (ConnectionError, socket.error) as e:
+            sim_status = Status(status=Status.FAILURE, msg=str(e))
+            self.log_error(sim_status)
+            self.close()
+            return
         except Exception as e:
-            self.close(e)
+            sim_status = Status(status=Status.ERROR, msg=str(e))
+            self.log_error(sim_status)
             return 0
 
     def is_socket_valid(self):
