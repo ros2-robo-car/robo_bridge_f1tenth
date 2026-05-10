@@ -1,0 +1,10 @@
+uint8 FLAG_ASYNC = 1
+
+float32 timestep
+string<=16 map
+uint8 flags
+---
+Status sim_status
+float32 timestep
+string<=16 map
+uint8 flags

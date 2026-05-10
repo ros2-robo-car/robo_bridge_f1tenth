@@ -30,6 +30,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Obs.msg"
   "msg/Recv.msg"
   "srv/Initsim.srv"
+  "srv/Startsim.srv"
 )
 
 ament_package()
