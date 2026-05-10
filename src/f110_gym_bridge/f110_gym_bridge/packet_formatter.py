@@ -7,11 +7,15 @@ def struct_size(type: MSGTYPE) -> int:
 
 def pack(type: MSGTYPE, attr: dict) -> bytes:
     try:
-        if type == MSGTYPE.REQUEST:
-            return _type_parser.pack(type) + FORMATTER[MSGTYPE.REQUEST].pack(
+        if type == MSGTYPE.INIT_REQUEST:
+            return _type_parser.pack(type) + FORMATTER[MSGTYPE.INIT_REQUEST].pack(
+                attr['timeout'], 
+            )
+        elif type == MSGTYPE.START_REQUEST:
+            return _type_parser.pack(type) + FORMATTER[MSGTYPE.START_REQUEST].pack(
                 attr['timestep'], 
+                attr['map'].encode(encoding='ascii'),
                 attr['flags'], 
-                attr['map'].encode(encoding='ascii')
             )
         elif type == MSGTYPE.SEND:
             return _type_parser.pack(type) + FORMATTER[MSGTYPE.SEND].pack(
@@ -27,14 +31,21 @@ def unpack(data: bytes) -> tuple[MSGTYPE, dict]:
     try:
         type = _type_parser.unpack(data[0:1])[0]
         attr = {}
-        if type == MSGTYPE.RESPONSE:
-            status, msg, timestep, flags, map = FORMATTER[MSGTYPE.RESPONSE].unpack(data[1:])
+        if type == MSGTYPE.INIT_RESPONSE:
+            type = MSGTYPE.INIT_RESPONSE
+            status, msg = FORMATTER[MSGTYPE.INIT_RESPONSE].unpack(data[1:])
+            attr['status'] = status
+            attr['msg'] = msg.decode(encoding='ascii').strip('\x00')
+        elif type == MSGTYPE.START_RESPONSE:
+            type = MSGTYPE.START_RESPONSE
+            status, msg, timestep, map, flags = FORMATTER[MSGTYPE.START_RESPONSE].unpack(data[1:])
             attr['status'] = status
             attr['msg'] = msg.decode(encoding='ascii').strip('\x00')
             attr['timestep'] = timestep
-            attr['flags'] = flags
             attr['map'] = map.decode(encoding='ascii').strip('\x00')
+            attr['flags'] = flags
         elif type == MSGTYPE.RECV:
+            type = MSGTYPE.RECV
             parsed = FORMATTER[MSGTYPE.RECV].unpack(data[1:])
             status, msg, egoidx = parsed[0], parsed[1], parsed[2]
             scans, poses, vels = parsed[3:1083], parsed[1083:1086], parsed[1086:1089]

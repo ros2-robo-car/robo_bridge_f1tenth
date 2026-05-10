@@ -1,3 +1,4 @@
+import rclpy
 import argparse, threading, time
 import f110_gym_bridge.example_keyboard as keyboard
 from f110_gym_bridge_interface import *
@@ -82,11 +83,13 @@ def readkey():
 def main():
     global client
     parser = argparse.ArgumentParser()
-    for key in ARG_DEFAULTS.keys(): 
+    for key in INIT_ARGS_DEFAULT.keys(): 
         parser.add_argument(f'--{key}', default=argparse.SUPPRESS)
-    for key in FLAG_MASKS.keys():
+    for key in START_FLAG_MASKS.keys():
         parser.add_argument(f'--{key}', action='store_true')
     parsed = parser.parse_args()
+    kwargs = vars(parsed)
+
 
     update_thread = threading.Thread(target=update, daemon=True)
     update_thread.start()
@@ -94,12 +97,28 @@ def main():
     keyboard_thread.start()
 
     try:
-        client = init_client_node(on_receive, parsed)
-        run_client_node(client)
+        rclpy.init()
+        main_client = F110GymClient(lambda x: None)
+
+        future = main_client.request_init(**kwargs)
+        rclpy.spin_until_future_complete(main_client, future, timeout_sec=main_client.timeout)
+        main_client.response_init(future.result())
+
+        while True:
+            future = main_client.request_start(**kwargs)
+            rclpy.spin_until_future_complete(main_client, future, timeout_sec=main_client.timeout)
+            main_client.response_start(future.result())
+
+            future = main_client.run()
+            rclpy.spin_until_future_complete(main_client, future)
+            result: Recv = future.result()
+            main_client.get_logger().info(f"Done: x: {result.obs.poses_x}, y: {result.obs.poses_y}")
+
     except KeyboardInterrupt:
-        print('Interrupt')
+        main_client.get_logger().info("Interrupted")
+    except SystemExit:
+        pass
     finally:
-        terminated_event.set()
-        update_thread.join()
-        print('press any key to exit...')
-        keyboard_thread.join()
+        if rclpy.ok():
+            main_client.destroy_node()
+            rclpy.shutdown()
