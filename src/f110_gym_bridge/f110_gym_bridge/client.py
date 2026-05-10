@@ -10,7 +10,7 @@ ARG_DEFAULTS = {
     'port': 22200,
     'timestep': 0.025,
     'timeout': 30.0,
-    'map': 'vegas'
+    'map': 'vegas',
 }
 
 FLAG_MASKS = {
@@ -18,6 +18,7 @@ FLAG_MASKS = {
 }
 
 class F110GymClient(Node):
+    _response = None
     _recv_callback: Callable[[Recv], None] = lambda recv: None
     _send_queue = queue.Queue()
 
@@ -39,7 +40,7 @@ class F110GymClient(Node):
         Args:
             msg (Act): Act data will be sent to Simulation. It contains steer, speed data.
         """
-        if msg is not Act:
+        if type(msg) != Act:
             raise TypeError('msg must be Act')
         self._send_queue.put(msg)
 
@@ -55,10 +56,10 @@ class F110GymClient(Node):
             setattr(req, key, kwargs[key])
         return self.init_client.call_async(req)
 
-    def _run(self, timestep):
+    def _run(self):
         self.recv_subscribe = self.create_subscription(Recv, "f110_recv", self._on_recv, 10)
         self.send_publisher = self.create_publisher(Act, "f110_send", 10)
-        self.create_timer(timestep, self._send)
+        self.create_timer(self._response.timestep, self._send)
 
     def _send(self):
         msg = None
@@ -86,38 +87,43 @@ class F110GymClient(Node):
         self.destroy_node()
         raise SystemExit
 
-def run_client_node(**kwargs):
+def init_client_node(recv_callback: Callable[[Recv], None], parameters: dict):
     """
-    Run F110GymClient. Before execution, Bridge node must be running.
+    Create F110GymClient and Request to Sim Server. Before execution, Bridge node must be running.
 
     Args:
+        recv_callback ((Recv) -> None): function will be exectued on receiving Recv data.
+
         host (str): Sim server's host name. Default is 'localhost'.
         port (int): Sim server's port. Default is 22200.
         timeout (float): Max wait time in seconds on connection. If value is 0 or negative, it will wait forever. Default is 30.
         timestep (float): Step interval of sim server in seconds. Default is 0.025.
         map (str): Name of map will be used in Simulation. It must be encoded ascii. Default is 'vegas'.
         async (bool): Flag that run on async mode. Default is False.
+
+    Return:
+        created F110GymClient Node
     """
     kwargs_checked = {}
     for key in ARG_DEFAULTS.keys(): 
-        if not hasattr(kwargs, key):
+        if not hasattr(parameters, key):
             print(f"use default value: {key} = {ARG_DEFAULTS[key]}")
             kwargs_checked[key] = ARG_DEFAULTS[key]
         else:
-            kwargs_checked[key] = getattr(kwargs, key)
+            kwargs_checked[key] = getattr(parameters, key)
 
     flags = 0
     for key in FLAG_MASKS.keys():
-        if getattr(kwargs, key):
+        if getattr(parameters, key):
             flags |= FLAG_MASKS[key]
     kwargs_checked['flags'] = flags
 
     try:
         rclpy.init()
-        main_client = F110GymClient()
+        main_client = F110GymClient(recv_callback)
 
         future = main_client._request(**kwargs_checked)
-        rclpy.spin_until_future_complete(main_client, future, timeout_sec=10)
+        rclpy.spin_until_future_complete(main_client, future, timeout_sec=kwargs_checked['timeout'])
         res = future.result()
         if res is None:
             main_client.get_logger().error('Can not receive response from sim server.')
@@ -129,10 +135,20 @@ def run_client_node(**kwargs):
             main_client.get_logger().warn(res.sim_status.msg)
             raise SystemExit
 
+        main_client._response = res
         main_client.get_logger().info(f'Sim Server is ready: {res.sim_status.msg}')
-        main_client._run(res.timestep)
-        rclpy.spin(main_client)
 
+    except KeyboardInterrupt:
+        main_client.get_logger().info("Interrupted")
+    except SystemExit:
+        pass
+
+    return main_client
+
+def run_client_node(main_client: F110GymClient):
+    try:
+        main_client._run()
+        rclpy.spin(main_client)
     except KeyboardInterrupt:
         main_client.get_logger().info("Interrupted")
     except SystemExit:
