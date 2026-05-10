@@ -72,7 +72,7 @@ class F110GymBridge(Node):
             res_msg = self.socket.recv(RECEIVE_UNIT)
             msgtype, resattr = unpack(res_msg[4:])
             if msgtype != MSGTYPE.INIT_RESPONSE:
-                raise Exception(f"Expected START_RESPONSE, receive {msgtype.name} ({msgtype})")
+                raise Exception(f"Expected INIT_RESPONSE, receive {msgtype.name} ({msgtype})")
             elif resattr['status'] >= Status.MAX:
                 raise Exception(f"Invalid Status: {resattr['status']}")
             elif resattr['status'] >= Status.FAILURE:
@@ -90,8 +90,6 @@ class F110GymBridge(Node):
         sim_status.msg = msg
         self.connected_event.set()
 
-        self.pub_interval = self.create_timer(max(resattr['timestep'], MIN_TIMESTEP), self.publish_flush)
-        self.pub_interval.cancel()
         with self.recv_publisher_lock:
             self.recv_publisher = self.create_publisher(Recv, "f110_recv", 10)
         with self.send_subscriber_lock:
@@ -133,6 +131,9 @@ class F110GymBridge(Node):
             self.socket.send(req_msg)
 
             res_msg = self.socket.recv(RECEIVE_UNIT)
+            if len(res_msg) == 0:
+                raise Exception(f"time out")
+
             msgtype, resattr = unpack(res_msg[4:])
             if msgtype != MSGTYPE.START_RESPONSE:
                 raise Exception(f"Expected START_RESPONSE, receive {msgtype.name} ({msgtype})")
@@ -148,7 +149,7 @@ class F110GymBridge(Node):
             return response
 
         self.sim_online_event.set()
-        self.pub_interval.reset()
+        self.pub_interval = self.create_timer(max(resattr['timestep'], MIN_TIMESTEP), self.publish_flush)
         self.recv_thread = threading.Thread(target=self.recvloop)
         self.recv_thread.start()
 
@@ -168,8 +169,9 @@ class F110GymBridge(Node):
             while self.recv_line._qsize() > 0:
                 self.publish(self.recv_line._get())
         
-        if self.sim_online_event.is_set():
-            self.pub_interval.cancel()
+        if not self.sim_online_event.is_set() and self.pub_interval != None:
+            self.pub_interval.destroy()
+            self.pub_interval = None
 
     def publish(self, recv_raw):
         if recv_raw == None:

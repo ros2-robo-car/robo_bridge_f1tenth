@@ -14,10 +14,11 @@ INIT_ARGS_DEFAULT = {
 
 START_ARGS_DEFAULT = {
     'timestep': 0.025,
+    'map': 'vegas'
 }
 
 START_FLAG_MASKS = {
-    'async': Initsim.Request.FLAG_ASYNC
+    'async': Startsim.Request.FLAG_ASYNC
 }
 
 class F110GymClient(Node):
@@ -39,9 +40,6 @@ class F110GymClient(Node):
             Created F110GymClient Node
         """
         super().__init__('f110_gym_client')
-
-        if type(recv_callback) != Callable[[Recv], None]:
-            raise TypeError('recv_callback must be Callable[[Recv], None]')
         self._recv_callback = recv_callback
 
         self.init_client = self.create_client(Initsim, 'init_sim')
@@ -62,14 +60,14 @@ class F110GymClient(Node):
             Future will be done when receiving response.
         """
         self.timeout = getattr(kwargs, 'timeout', 30)
-        return self._request(INIT_ARGS_DEFAULT, [], self.init_client, Initsim.Request, kwargs)
+        return self._request(INIT_ARGS_DEFAULT, {}, self.init_client, Initsim.Request, kwargs)
     
     def response_init(self, res:Initsim.Response):
         try:
             self._assert_response_error(res)
             self.get_logger().info(f'Sim server is initialized: {res.sim_status.msg}')
         except SystemExit as e:
-            self.get_logger().error(f'Failed to Initialized: {res.sim_status.msg}')
+            self.get_logger().error(f'Failed to Initialized: {e}')
             raise e
     
     def request_start(self, **kwargs):
@@ -92,8 +90,9 @@ class F110GymClient(Node):
 
             self._publish_interval = res.timestep
             self.get_logger().info(f'Sim server is Ready: {res.sim_status.msg}')
+            self._sim_online_event.set()
         except SystemExit as e:
-            self.get_logger().error(f'Failed to Start: {res.sim_status.msg}')
+            self.get_logger().error(f'Failed to Start: {e}')
             raise e
     
     def run(self):
@@ -121,17 +120,17 @@ class F110GymClient(Node):
     def _request(self, args, flags, client, creator, kwargs):
         kwargs_checked = {}
         for key in args.keys(): 
-            if not hasattr(kwargs, key):
-                print(f"use default value: {key} = {args[key]}")
+            if kwargs.get(key) == None:
+                self.get_logger().info(f"use default value: {key} = {args[key]}")
                 kwargs_checked[key] = args[key]
             else:
-                kwargs_checked[key] = getattr(kwargs, key)
+                kwargs_checked[key] = kwargs[key]
 
-        _flags = 0
-        for key in flags.keys():
-            if getattr(kwargs, key):
-                _flags |= flags[key]
-        kwargs_checked['flags'] = _flags
+        if len(flags) > 0:
+            _flags = 0
+            for key in flags.keys():
+                _flags |= kwargs.get(key, False)
+            kwargs_checked['flags'] = _flags
 
         if not client.wait_for_service(timeout_sec=3):
             self.get_logger().error('Service not available. Check whether service is on.')
@@ -139,9 +138,9 @@ class F110GymClient(Node):
             raise SystemExit
 
         req = creator()
-        for key in kwargs.keys():
-            setattr(req, key, kwargs[key])
-        return self.client.call_async(req)
+        for key in kwargs_checked.keys():
+            setattr(req, key, kwargs_checked[key])
+        return client.call_async(req)
 
     def _assert_response_error(self, res):
         if res is None:

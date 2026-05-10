@@ -1,5 +1,5 @@
 import rclpy
-import argparse, threading, time
+import argparse, traceback, threading, time
 import f110_gym_bridge.example_keyboard as keyboard
 from f110_gym_bridge_interface import *
 from f110_gym_bridge.client import *
@@ -36,10 +36,10 @@ def on_receive(msg: Recv):
         last_receive_time = cur_time
         print(f"[{time.time()}] x: {msg.obs.poses_x}, y:{msg.obs.poses_y}")
 
-client = None
+main_client = None
 PRESS_TIME = 3
 def update():
-    global client
+    global main_client
     steer, speed = 0., 0.
     while not terminated_event.is_set():
         curTime = time.time()
@@ -51,11 +51,11 @@ def update():
         speed = 5.0 if key_up else 0.0
         steer = (key_left - key_right) * 1.0
 
-        if client != None:
+        if main_client != None:
             act = Act()
             act.steer = steer
             act.speed = speed
-            client.send(act)
+            main_client.send(act)
 
         elapsedTime = time.time() - curTime
         if elapsedTime < INTERVAL:
@@ -81,7 +81,7 @@ def readkey():
                 time.sleep(INTERVAL - elapsedTime)
 
 def main():
-    global client
+    global main_client
     parser = argparse.ArgumentParser()
     for key in INIT_ARGS_DEFAULT.keys(): 
         parser.add_argument(f'--{key}', default=argparse.SUPPRESS)
@@ -90,7 +90,6 @@ def main():
     parsed = parser.parse_args()
     kwargs = vars(parsed)
 
-
     update_thread = threading.Thread(target=update, daemon=True)
     update_thread.start()
     keyboard_thread = threading.Thread(target=readkey, daemon=True)
@@ -98,7 +97,7 @@ def main():
 
     try:
         rclpy.init()
-        main_client = F110GymClient(lambda x: None)
+        main_client = F110GymClient(on_receive)
 
         future = main_client.request_init(**kwargs)
         rclpy.spin_until_future_complete(main_client, future, timeout_sec=main_client.timeout)
@@ -116,9 +115,14 @@ def main():
 
     except KeyboardInterrupt:
         main_client.get_logger().info("Interrupted")
-    except SystemExit:
-        pass
+    except:
+        traceback.print_exc()
     finally:
+        terminated_event.set()
         if rclpy.ok():
             main_client.destroy_node()
             rclpy.shutdown()
+
+        print("press any key to exit...")
+        update_thread.join()
+        keyboard_thread.join()
