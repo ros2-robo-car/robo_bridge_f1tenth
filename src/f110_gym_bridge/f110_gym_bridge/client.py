@@ -9,6 +9,7 @@ ARG_DEFAULTS = {
     'host': 'localhost',
     'port': 22200,
     'timestep': 0.025,
+    'timeout': 30.0,
     'map': 'vegas'
 }
 
@@ -92,6 +93,7 @@ def run_client_node(**kwargs):
     Args:
         host (str): Sim server's host name. Default is 'localhost'.
         port (int): Sim server's port. Default is 22200.
+        timeout (float): Max wait time in seconds on connection. If value is 0 or negative, it will wait forever. Default is 30.
         timestep (float): Step interval of sim server in seconds. Default is 0.025.
         map (str): Name of map will be used in Simulation. It must be encoded ascii. Default is 'vegas'.
         async (bool): Flag that run on async mode. Default is False.

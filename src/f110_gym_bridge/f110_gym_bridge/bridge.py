@@ -8,7 +8,6 @@ from .packet_formatter import *
 
 RECEIVE_UNIT = 8192
 MIN_TIMESTEP = 0.01
-TIMEOUT = 10
 
 header_parser = struct.Struct('!I')
 type_parser = struct.Struct('!B')
@@ -58,6 +57,7 @@ class F110GymBridge(Node):
         self.addr = (request.host, request.port)
         reqattr = {
             'timestep': request.timestep,
+            'timeout': request.timeout,
             'map': request.map,
             'flags': request.flags
         }
@@ -73,7 +73,10 @@ class F110GymBridge(Node):
 
         self.get_logger().info(f"connecting to {self.addr[0]}:{self.addr[1]}")
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.settimeout(TIMEOUT)
+        if reqattr['timeout'] > 0.0:
+            self.socket.settimeout(reqattr['timeout'])
+        else:
+            self.socket.settimeout(None)
         try:
             self.socket.connect(self.addr)
             send_msg = pack(MSGTYPE.REQUEST, reqattr)

@@ -2,6 +2,7 @@ uint8 FLAG_ASYNC = 1
 
 string<=15 host
 uint16 port
+float32 timeout
 float32 timestep
 uint8 flags
 string<=16 map

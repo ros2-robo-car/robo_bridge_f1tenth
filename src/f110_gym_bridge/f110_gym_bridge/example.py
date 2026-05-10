@@ -18,14 +18,23 @@ def key_event_callback(e):
     key_state[e.name] = True if e.event_type == "down" else False
     key_state_lock.release()
 
+last_receive_time = 0
+last_status = Status.DONE
+PRINT_RECV_INTERVAL = 3
 def on_receive(msg: Recv):
-    pass
+    if msg.sim_status.status != last_status:
+        last_status = msg.sim_status.status
+        print(f"[{cur_time}] Status: {last_status}")
+
+    cur_time = time.time()
+    if cur_time - last_receive_time > PRINT_RECV_INTERVAL:
+        last_receive_time = cur_time
+        print(f"[{cur_time}] x: {msg.obs.poses_x}, y:{msg.obs.poses_y}")
 
 client = F110GymClient(on_receive)
 
 def update():
     steer, speed = 0., 0.
-    quit = False
     while not terminated_event.is_set():
         curTime = time.time()
         key_state_lock.acquire()
@@ -57,6 +66,7 @@ def main():
     try:
         run_client_node(parsed)
     except KeyboardInterrupt:
-        pass
+        print('Interrupt')
     finally:
         terminated_event.set()
+        t.join()
