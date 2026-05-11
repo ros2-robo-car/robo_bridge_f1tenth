@@ -33,7 +33,7 @@ class F110GymBridge(Node):
 
         self._latest_recv_id = 0
         self._latest_send_id = 0
-        self._recv_statsh = []
+        self._recv_stash = []
 
         self.get_logger().info("node f110_gym_bridge initialized.")
         self.init_service = self.create_service(Initsim, 'init_sim', self.initsim)
@@ -47,7 +47,7 @@ class F110GymBridge(Node):
         
         self._latest_send_id = 0
         self._latest_recv_id = 0
-        self._recv_statsh.clear()
+        self._recv_stash.clear()
     
     # callback of init_service
     def initsim(self, request: Initsim.Request, response: Initsim.Response):
@@ -67,7 +67,6 @@ class F110GymBridge(Node):
             'timeout': request.timeout
         }
 
-        self.get_logger().info(f"Init simulation to {self.addr[0]}:{self.addr[1]}")
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if request.timeout > 0.0:
             self.socket.settimeout(request.timeout)
@@ -77,6 +76,7 @@ class F110GymBridge(Node):
             self.socket.connect(self.addr)
             req_msg = pack(MSGTYPE.INIT_REQUEST, reqattr)
             self._send(req_msg)
+            self.get_logger().info(f"Request initiating simulation to {self.addr[0]}:{self.addr[1]}...")
 
             # ^ Send Request -- Recv Response v
 
@@ -87,7 +87,7 @@ class F110GymBridge(Node):
             elif resattr['status'] >= Status.MAX:
                 raise Exception(f"Invalid Status: {resattr['status']}")
             elif resattr['status'] >= Status.FAILURE:
-                raise Exception(resattr['msg'])
+                raise Exception(f"From server: {resattr['msg']}")
         except Exception as e:
             sim_status.status = Status.FAILURE
             sim_status.msg = f"Init simulation Error: {e}"
@@ -95,7 +95,7 @@ class F110GymBridge(Node):
             self.close()
             return response
         
-        msg = f"Init simulation. Sim Server is Ready: {resattr['msg']}"
+        msg = f"Simulation initialized: {resattr['msg']}"
         self.get_logger().info(msg)
         sim_status.status = resattr['status']
         sim_status.msg = msg
@@ -139,20 +139,18 @@ class F110GymBridge(Node):
         try:
             req_msg = pack(MSGTYPE.START_REQUEST, reqattr)
             self._send(req_msg)
+            self.get_logger().info(f"Request start simulation...")
 
             # ^ Send Request -- Recv Response v
 
             res_msg = self._recv()
-            if len(res_msg) == 0:
-                raise Exception(f"time out")
-
             msgtype, resattr = unpack(res_msg)
             if msgtype != MSGTYPE.START_RESPONSE:
                 raise Exception(f"Expected START_RESPONSE, receive {msgtype.name} ({msgtype})")
             elif resattr['status'] >= Status.MAX:
                 raise Exception(f"Invalid Status: {resattr['status']}")
             elif resattr['status'] >= Status.FAILURE:
-                raise Exception(resattr['msg'])
+                raise Exception(f"From server: {resattr['msg']}")
         except Exception as e:
             sim_status.status = Status.FAILURE
             sim_status.msg = f"Start simulation Error: {e}"
@@ -165,7 +163,7 @@ class F110GymBridge(Node):
         self.recv_thread = threading.Thread(target=self.recvloop)
         self.recv_thread.start()
 
-        msg = f"Sim Server is Ready: {resattr['msg']}"
+        msg = f"Simulation started: {resattr['msg']}"
         self.get_logger().info(msg)
         sim_status.status = resattr['status']
         sim_status.msg = msg
@@ -236,10 +234,10 @@ class F110GymBridge(Node):
         verbose = 'Error'
         if sim_status.status == Status.FAILURE:
             verbose = 'Failure'
-        self.get_logger().error(f"{verbose}: {sim_status.msg}")
+        sim_status.msg = f"{verbose}: {sim_status.msg}"
+        self.get_logger().error(sim_status.msg)
         with self.recv_publisher_lock:
             if self.recv_publisher != None:
-                sim_status.msg = f"{verbose}: {sim_status.msg}"
                 self.recv_publisher.publish(Recv(sim_status=sim_status))
 
     def close(self):
@@ -273,7 +271,15 @@ class F110GymBridge(Node):
 
     def recvloop(self):
         while self.sim_online_event.is_set():
-            self.recv_line.put(self._recv())
+            try:
+                self.recv_line.put(self._recv())
+            except (ConnectionError, socket.error) as e:
+                sim_status = Status(status=Status.FAILURE, msg=str(e))
+                self.log_error(sim_status)
+                self.close()
+            except Exception as e:
+                sim_status = Status(status=Status.ERROR, msg=str(e))
+                self.log_error(sim_status)
 
     def _recv(self):
         if not self.is_socket_valid():
@@ -281,53 +287,33 @@ class F110GymBridge(Node):
             return
         
         msg = b''
-        try:
-            # assure sequence
-            while True:
-                if self._recv_statsh[0][0] == self._latest_recv_id:
-                    msg = heapq.heappop(self._recv_statsh)[1]
-                    return msg
+        # assure sequence
+        while True:
+            if len(self._recv_stash) > 0 and self._recv_stash[0][0] == self._latest_recv_id:
+                msg = heapq.heappop(self._recv_stash)[1]
+                return msg
 
-                recv = self.socket.recv(8)
-                if len(recv) == 0:
-                    raise ConnectionError('Disconnect')
-                
-                msglen, msgid = header_parser.unpack(recv)
-                msg = self.socket.recv(msglen)
-                if msgid == self._latest_recv_id:
-                    self._latest_recv_id = (self._latest_recv_id + 1) % (UINT_MAX + 1)
-                    return msg
-                else:
-                    heapq.heappush(self._recv_statsh, (msgid, msg))
-
-        except (ConnectionError, socket.error) as e:
-            sim_status = Status(status=Status.FAILURE, msg=str(e))
-            self.log_error(sim_status)
-            self.close()
-            return b''
-        except Exception as e:
-            sim_status = Status(status=Status.ERROR, msg=str(e))
-            self.log_error(sim_status)
-            return b''
+            recv = self.socket.recv(8)
+            if len(recv) == 0:
+                raise ConnectionError('Disconnect')
+            
+            msglen, msgid = header_parser.unpack(recv)
+            msg = self.socket.recv(msglen)
+            if msgid == self._latest_recv_id:
+                self._latest_recv_id = (self._latest_recv_id + 1) % (UINT_MAX + 1)
+                return msg
+            else:
+                heapq.heappush(self._recv_stash, (msgid, msg))
     
     def _send(self, data):
         if not self.is_socket_valid():
             self.close()
             return
 
-        header = header_parser.pack(len(data))
+        header = header_parser.pack(len(data), self._latest_send_id)
         msg = header + data
-        try:
-            return self.socket.send(msg)
-        except (ConnectionError, socket.error) as e:
-            sim_status = Status(status=Status.FAILURE, msg=str(e))
-            self.log_error(sim_status)
-            self.close()
-            return
-        except Exception as e:
-            sim_status = Status(status=Status.ERROR, msg=str(e))
-            self.log_error(sim_status)
-            return
+        self.socket.send(msg)
+        self._latest_send_id += 1
 
     def is_socket_valid(self):
         return type(self.socket) == socket.socket
