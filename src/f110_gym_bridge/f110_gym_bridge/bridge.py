@@ -1,4 +1,4 @@
-import queue, socket, struct, threading
+import heapq, queue, socket, struct, threading
 import rclpy
 from rclpy.node import Node
 from f110_gym_bridge_interface.msg import Act, Obs, Recv, Status
@@ -8,8 +8,9 @@ from .packet_formatter import *
 
 RECEIVE_UNIT = 8192
 MIN_TIMESTEP = 0.01
+UINT_MAX = (1 << 32) - 1
 
-header_parser = struct.Struct('!I')
+header_parser = struct.Struct('!II')
 type_parser = struct.Struct('!B')
 
 class F110GymBridge(Node):
@@ -30,14 +31,23 @@ class F110GymBridge(Node):
         self.send_subscriber_lock = threading.Lock()
         self.init_service = None
 
+        self._latest_recv_id = 0
+        self._latest_send_id = 0
+        self._recv_statsh = []
+
         self.get_logger().info("node f110_gym_bridge initialized.")
         self.init_service = self.create_service(Initsim, 'init_sim', self.initsim)
         self.start_service = self.create_service(Startsim, 'start_sim', self.startsim)
     
-    def _flush_receive_line(self):
+    def _flush(self):
+
         with self.recv_line.mutex:
             while self.recv_line._qsize() > 0:
                 self.recv_line._get()
+        
+        self._latest_send_id = 0
+        self._latest_recv_id = 0
+        self._recv_statsh.clear()
     
     # callback of init_service
     def initsim(self, request: Initsim.Request, response: Initsim.Response):
@@ -69,8 +79,10 @@ class F110GymBridge(Node):
             req_msg = header_parser.pack(len(req_msg)) + req_msg
             self.socket.send(req_msg)
 
-            res_msg = self.socket.recv(RECEIVE_UNIT)
-            msgtype, resattr = unpack(res_msg[4:])
+            # ^ Send Request -- Recv Response v
+
+            res_msg = self._recv()
+            msgtype, resattr = unpack(res_msg)
             if msgtype != MSGTYPE.INIT_RESPONSE:
                 raise Exception(f"Expected INIT_RESPONSE, receive {msgtype.name} ({msgtype})")
             elif resattr['status'] >= Status.MAX:
@@ -130,11 +142,13 @@ class F110GymBridge(Node):
             req_msg = header_parser.pack(len(req_msg)) + req_msg
             self.socket.send(req_msg)
 
-            res_msg = self.socket.recv(RECEIVE_UNIT)
+            # ^ Send Request -- Recv Response v
+
+            res_msg = self._recv()
             if len(res_msg) == 0:
                 raise Exception(f"time out")
 
-            msgtype, resattr = unpack(res_msg[4:])
+            msgtype, resattr = unpack(res_msg)
             if msgtype != MSGTYPE.START_RESPONSE:
                 raise Exception(f"Expected START_RESPONSE, receive {msgtype.name} ({msgtype})")
             elif resattr['status'] >= Status.MAX:
@@ -257,32 +271,46 @@ class F110GymBridge(Node):
                 self.recv_thread.join()
             self.recv_thread = None
 
+        self._flush()
+
     def recvloop(self):
         while self.sim_online_event.is_set():
-            self.recv()
+            self.recv_line.put(self._recv())
 
-    def recv(self):
+    def _recv(self):
         if not self.is_socket_valid():
             self.close()
             return
         
         msg = b''
         try:
-            recv = self.socket.recv(4)
-            if len(recv) == 0:
-                raise ConnectionError('Disconnect')
-            msglen = header_parser.unpack(recv)[0]
-            msg = self.socket.recv(msglen)
-            self.recv_line.put(msg)
+            # assure sequence
+            while True:
+                if self._recv_statsh[0][0] == self._latest_recv_id:
+                    msg = heapq.heappop(self._recv_statsh)[1]
+                    return msg
+
+                recv = self.socket.recv(8)
+                if len(recv) == 0:
+                    raise ConnectionError('Disconnect')
+                
+                msglen, msgid = header_parser.unpack(recv)
+                msg = self.socket.recv(msglen)
+                if msgid == self._latest_recv_id:
+                    self._latest_recv_id = (self._latest_recv_id + 1) % (UINT_MAX + 1)
+                    return msg
+                else:
+                    heapq.heappush(self._recv_statsh, (msgid, msg))
+
         except (ConnectionError, socket.error) as e:
             sim_status = Status(status=Status.FAILURE, msg=str(e))
             self.log_error(sim_status)
             self.close()
-            return
+            return b''
         except Exception as e:
             sim_status = Status(status=Status.ERROR, msg=str(e))
             self.log_error(sim_status)
-            return
+            return b''
     
     def send(self, data):
         if not self.is_socket_valid():
