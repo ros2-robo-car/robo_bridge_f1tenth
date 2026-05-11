@@ -76,8 +76,7 @@ class F110GymBridge(Node):
         try:
             self.socket.connect(self.addr)
             req_msg = pack(MSGTYPE.INIT_REQUEST, reqattr)
-            req_msg = header_parser.pack(len(req_msg)) + req_msg
-            self.socket.send(req_msg)
+            self._send(req_msg)
 
             # ^ Send Request -- Recv Response v
 
@@ -139,8 +138,7 @@ class F110GymBridge(Node):
         
         try:
             req_msg = pack(MSGTYPE.START_REQUEST, reqattr)
-            req_msg = header_parser.pack(len(req_msg)) + req_msg
-            self.socket.send(req_msg)
+            self._send(req_msg)
 
             # ^ Send Request -- Recv Response v
 
@@ -232,7 +230,7 @@ class F110GymBridge(Node):
             'speed': msg.speed
         }
         send_data = pack(MSGTYPE.SEND, sendattr)
-        self.send(send_data)
+        self._send(send_data)
 
     def log_error(self, sim_status: Status):
         verbose = 'Error'
@@ -312,7 +310,7 @@ class F110GymBridge(Node):
             self.log_error(sim_status)
             return b''
     
-    def send(self, data):
+    def _send(self, data):
         if not self.is_socket_valid():
             self.close()
             return
