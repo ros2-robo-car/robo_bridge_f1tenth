@@ -19,13 +19,19 @@ class F110GymBridge(Node):
 
         self.socket = None
         self.addr = None
+        self.timeout = None
         self.connected_event = threading.Event()
         self.sim_online_event = threading.Event()
 
         self.recv_thread = None
-        self.recv_line = queue.Queue()
         self.recv_publisher = None
         self.recv_publisher_lock = threading.Lock()
+        self.recv_stash = {
+            MSGTYPE.INIT_RESPONSE: queue.Queue(),
+            MSGTYPE.START_RESPONSE: queue.Queue(),
+            MSGTYPE.RECV: queue.Queue()
+        }
+
         self.pub_interval = None
         self.send_subscriber = None
         self.send_subscriber_lock = threading.Lock()
@@ -33,21 +39,25 @@ class F110GymBridge(Node):
 
         self._latest_recv_id = 0
         self._latest_send_id = 0
-        self._recv_stash = []
+        self._recv_pending_heap = []
 
         self.get_logger().info("node f110_gym_bridge initialized.")
         self.init_service = self.create_service(Initsim, 'init_sim', self.initsim)
         self.start_service = self.create_service(Startsim, 'start_sim', self.startsim)
     
     def _flush(self):
+        for key in self.recv_stash.keys():
+            self._flush_line(key)
 
-        with self.recv_line.mutex:
-            while self.recv_line._qsize() > 0:
-                self.recv_line._get()
-        
         self._latest_send_id = 0
         self._latest_recv_id = 0
-        self._recv_stash.clear()
+        self._recv_pending_heap.clear()
+
+    def _flush_line(self, msgtype: MSGTYPE):
+        line = self.recv_stash[msgtype]
+        with line.mutex:
+            while line._qsize() > 0:
+                line._get()
     
     # callback of init_service
     def initsim(self, request: Initsim.Request, response: Initsim.Response):
@@ -69,22 +79,23 @@ class F110GymBridge(Node):
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if request.timeout > 0.0:
-            self.socket.settimeout(request.timeout)
+            self.timeout = request.timeout
         else:
-            self.socket.settimeout(None)
+            self.timeout = None
+        self.socket.settimeout(self.timeout)
         try:
             self.socket.connect(self.addr)
+            self.recv_thread = threading.Thread(target=self._recv_loop)
+            self.recv_thread.start()
+
             req_msg = pack(MSGTYPE.INIT_REQUEST, reqattr)
             self._send(req_msg)
             self.get_logger().info(f"Request initiating simulation to {self.addr[0]}:{self.addr[1]}...")
 
             # ^ Send Request -- Recv Response v
 
-            res_msg = self._recv()
-            msgtype, resattr = unpack(res_msg)
-            if msgtype != MSGTYPE.INIT_RESPONSE:
-                raise Exception(f"Expected INIT_RESPONSE, receive {msgtype.name} ({msgtype})")
-            elif resattr['status'] >= Status.MAX:
+            resattr = self.recv_stash[MSGTYPE.INIT_RESPONSE].get(timeout=self.timeout)
+            if resattr['status'] >= Status.MAX:
                 raise Exception(f"Invalid Status: {resattr['status']}")
             elif resattr['status'] >= Status.FAILURE:
                 raise Exception(f"From server: {resattr['msg']}")
@@ -143,11 +154,8 @@ class F110GymBridge(Node):
 
             # ^ Send Request -- Recv Response v
 
-            res_msg = self._recv()
-            msgtype, resattr = unpack(res_msg)
-            if msgtype != MSGTYPE.START_RESPONSE:
-                raise Exception(f"Expected START_RESPONSE, receive {msgtype.name} ({msgtype})")
-            elif resattr['status'] >= Status.MAX:
+            resattr = self.recv_stash[MSGTYPE.START_RESPONSE].get(timeout=self.timeout)
+            if resattr['status'] >= Status.MAX:
                 raise Exception(f"Invalid Status: {resattr['status']}")
             elif resattr['status'] >= Status.FAILURE:
                 raise Exception(f"From server: {resattr['msg']}")
@@ -159,9 +167,8 @@ class F110GymBridge(Node):
             return response
 
         self.sim_online_event.set()
+        self._flush_line(MSGTYPE.RECV)
         self.pub_interval = self.create_timer(max(resattr['timestep'], MIN_TIMESTEP), self.publish_flush)
-        self.recv_thread = threading.Thread(target=self.recvloop)
-        self.recv_thread.start()
 
         msg = f"Simulation started: {resattr['msg']}"
         self.get_logger().info(msg)
@@ -175,27 +182,16 @@ class F110GymBridge(Node):
 
     # publish with recv_publisher
     def publish_flush(self):
-        with self.recv_line.mutex:
-            while self.recv_line._qsize() > 0:
-                self.publish(self.recv_line._get())
+        recv_line = self.recv_stash[MSGTYPE.RECV]
+        with recv_line.mutex:
+            while recv_line._qsize() > 0:
+                self.publish(recv_line._get())
         
         if not self.sim_online_event.is_set() and self.pub_interval != None:
             self.pub_interval.destroy()
             self.pub_interval = None
 
-    def publish(self, recv_raw):
-        if recv_raw == None:
-            return
-        
-        if len(recv_raw) != struct_size(MSGTYPE.RECV):
-            self.get_logger().error(f"Expected RECV size ({struct_size(MSGTYPE.RECV)}bytes), Receive {len(recv_raw)}bytes.")
-            return
-
-        msgtype, attr = unpack(recv_raw)
-        if msgtype != MSGTYPE.RECV:
-            self.get_logger().error(f"Wrong RECV type: {msgtype.name} ({msgtype})")
-            return
-        
+    def publish(self, attr):
         obs = Obs()
         obs.ego_idx, obs.scans, obs.collisions = attr['ego_idx'], attr['scans'], bool(attr['collisions'])
         obs.poses_x, obs.poses_y, obs.poses_theta = attr['poses_x'], attr['poses_y'], attr['poses_theta']
@@ -269,10 +265,12 @@ class F110GymBridge(Node):
 
         self._flush()
 
-    def recvloop(self):
-        while self.sim_online_event.is_set():
+    def _recv_loop(self):
+        while self.connected_event.is_set():
             try:
-                self.recv_line.put(self._recv())
+                msg_raw = self._recv()
+                msgtype, msg = unpack(msg_raw)
+                self.recv_stash[msgtype].put(msg)
             except (ConnectionError, socket.error) as e:
                 sim_status = Status(status=Status.FAILURE, msg=str(e))
                 self.log_error(sim_status)
@@ -289,8 +287,8 @@ class F110GymBridge(Node):
         msg = b''
         # assure sequence
         while True:
-            if len(self._recv_stash) > 0 and self._recv_stash[0][0] == self._latest_recv_id:
-                msg = heapq.heappop(self._recv_stash)[1]
+            if len(self._recv_pending_heap) > 0 and self._recv_pending_heap[0][0] == self._latest_recv_id:
+                msg = heapq.heappop(self._recv_pending_heap)[1]
                 return msg
 
             recv = self.socket.recv(8)
@@ -303,7 +301,7 @@ class F110GymBridge(Node):
                 self._latest_recv_id = (self._latest_recv_id + 1) % (UINT_MAX + 1)
                 return msg
             else:
-                heapq.heappush(self._recv_stash, (msgid, msg))
+                heapq.heappush(self._recv_pending_heap, (msgid, msg))
     
     def _send(self, data):
         if not self.is_socket_valid():
