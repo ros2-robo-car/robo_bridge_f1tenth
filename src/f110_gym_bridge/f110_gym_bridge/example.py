@@ -83,7 +83,8 @@ def readkey():
 def main():
     global main_client
     parser = argparse.ArgumentParser()
-    for key in INIT_ARGS_DEFAULT.keys(): 
+    args_default = INIT_ARGS_DEFAULT | START_ARGS_DEFAULT
+    for key in args_default.keys(): 
         parser.add_argument(f'--{key}', default=argparse.SUPPRESS)
     for key in START_FLAG_MASKS.keys():
         parser.add_argument(f'--{key}', action='store_true')

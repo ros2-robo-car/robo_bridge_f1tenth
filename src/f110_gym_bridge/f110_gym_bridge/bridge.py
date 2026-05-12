@@ -84,6 +84,7 @@ class F110GymBridge(Node):
             self.timeout = None
         self.socket.settimeout(self.timeout)
         try:
+            self.connected_event.set()
             self.socket.connect(self.addr)
             self.recv_thread = threading.Thread(target=self._recv_loop)
             self.recv_thread.start()
@@ -187,9 +188,18 @@ class F110GymBridge(Node):
             while recv_line._qsize() > 0:
                 self.publish(recv_line._get())
         
+        self.recv_publisher_lock.acquire()
+        if self.recv_publisher == None or self.recv_publisher.get_subscription_count() == 0:
+            self.get_logger().error(f"Disconnect with Client")
+            self.recv_publisher_lock.release()
+            self.close()
+        else:
+            self.recv_publisher_lock.release()
+
         if not self.sim_online_event.is_set() and self.pub_interval != None:
             self.pub_interval.destroy()
             self.pub_interval = None
+
 
     def publish(self, attr):
         obs = Obs()
@@ -202,17 +212,9 @@ class F110GymBridge(Node):
         recv.elapsed_time = attr['elapsed_time']
         recv.sim_status = Status(status=attr['status'], msg=attr['msg'])
         
-        self.recv_publisher_lock.acquire()
-        if self.recv_publisher == None:
-            self.recv_publisher_lock.release()
-            return
-        elif self.recv_publisher.get_subscription_count() == 0:
-            self.recv_publisher_lock.release()
-            self.get_logger().error(f"Disconnect with Client")
-            self.close()
-        else:
-            self.recv_publisher.publish(recv)
-            self.recv_publisher_lock.release()
+        with self.recv_publisher_lock:
+            if self.recv_publisher != None:
+                self.recv_publisher.publish(recv)
         
         if recv.sim_status.status == Status.DONE:
             self.sim_online_event.clear()
@@ -243,6 +245,7 @@ class F110GymBridge(Node):
         self.sim_online_event.clear()
 
         try: 
+            self.socket.settimeout(0)
             self.socket.close()
         except:
             pass
@@ -264,6 +267,7 @@ class F110GymBridge(Node):
             self.recv_thread = None
 
         self._flush()
+        self.get_logger().info('Connection closed')
 
     def _recv_loop(self):
         while self.connected_event.is_set():
